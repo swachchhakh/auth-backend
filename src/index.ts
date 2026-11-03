@@ -4,6 +4,7 @@ import express, { NextFunction, Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
+import cors from "cors";
 import rateLimit from "express-rate-limit";
 import { Pool } from "pg";
 import { z } from "zod";
@@ -12,9 +13,20 @@ const db = new Pool({ connectionString: process.env.DATABASE_URL });
 const app = express();
 const isProd = process.env.NODE_ENV === "production";
 const SESSION_DAYS = 7;
+// Comma-separated list of allowed frontend origins, e.g. "http://localhost:5173,https://myapp.vercel.app"
+const allowedOrigins = (process.env.CORS_ORIGIN ?? "")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
 
 app.set("trust proxy", 1); // Render sits behind a proxy
 app.use(helmet());
+if (allowedOrigins.length) {
+  // CORS_ORIGIN=* means "allow any website" (reflects the caller's origin).
+  // Convenient for demos, but any site can then use a logged-in user's cookie.
+  const allowAny = allowedOrigins.includes("*");
+  app.use(cors({ origin: allowAny ? true : allowedOrigins, credentials: true }));
+}
 app.use(express.json());
 app.use(cookieParser());
 
@@ -61,7 +73,8 @@ app.post("/auth/login", authLimiter, async (req, res) => {
   res.cookie("sid", token, {
     httpOnly: true,
     secure: isProd,
-    sameSite: "lax",
+    // a frontend on another site (e.g. localhost -> onrender.com) needs "none"
+    sameSite: isProd && allowedOrigins.length ? "none" : "lax",
     maxAge: SESSION_DAYS * 24 * 60 * 60 * 1000,
   });
   res.json({ ok: true });
